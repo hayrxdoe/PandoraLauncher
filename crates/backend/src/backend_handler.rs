@@ -1,6 +1,6 @@
 use std::{borrow::Cow, io::{BufRead, Read}, sync::Arc, time::{Duration, Instant, SystemTime}};
 
-use auth::{credentials::AccountCredentials, models::{MinecraftAccessToken}, secret::PlatformSecretStorage};
+use auth::{credentials::AccountCredentials, models::MinecraftAccessToken, secret::PlatformSecretStorage};
 use bridge::{
     install::{ContentDownload, ContentInstall, ContentInstallFile, ContentInstallPath, InstallTarget}, instance::{ContentSummary, ContentType}, keep_alive::KeepAlive, message::{AccountCapesResult, AccountSkinResult, BackendConfigWithPassword, LogFiles, MessageToBackend, MessageToFrontend}, meta::MetadataResult, modal_action::{ModalAction, ModalActionVisitUrl, ProgressTracker, ProgressTrackerFinishType}, safe_path::SafePath, serial::AtomicOptionSerial
 };
@@ -226,7 +226,19 @@ impl BackendState {
                     return;
                 };
 
+                scopeguard::defer! {
+                    modal_action.set_finished();
+                    drop(keepalive);
+                    if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
+                        if let Some(launch_keepalive) = &instance.launch_keepalive && !launch_keepalive.is_alive() {
+                            instance.launch_keepalive = None;
+                        }
+                        self.send.send(instance.create_modify_message());
+                    }
+                }
+
                 let Some(login_info) = self.get_login_info(&modal_action, configuration.preferred_account).await else {
+                    modal_action.set_error_message("Unable to log in to Minecraft account".into());
                     return;
                 };
 
@@ -239,7 +251,6 @@ impl BackendState {
                 };
 
                 if modal_action.error.read().is_some() {
-                    modal_action.set_finished();
                     self.send.send(MessageToFrontend::Refresh);
                     return;
                 }
@@ -251,9 +262,6 @@ impl BackendState {
 
                 if matches!(result, Err(LaunchError::CancelledByUser)) {
                     self.send.send(MessageToFrontend::CloseModal);
-                    if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
-                        self.send.send(instance.create_modify_message());
-                    }
                     return;
                 }
 
@@ -282,15 +290,8 @@ impl BackendState {
                     },
                 }
 
-                drop(keepalive);
-
-                if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
-                    self.send.send(instance.create_modify_message());
-                }
-
-                launch_tracker.set_finished(if is_err { ProgressTrackerFinishType::Error } else { ProgressTrackerFinishType::Normal });
+                launch_tracker.set_finished(ProgressTrackerFinishType::from_err(is_err));
                 launch_tracker.notify();
-                modal_action.set_finished();
             },
             MessageToBackend::SetContentEnabled { id, content_ids: mod_ids, enabled } => {
                 let mut instance_state = self.instance_state.write();

@@ -439,6 +439,8 @@ impl BackendState {
             if killed {
                 instance.update_session();
                 self.send.send(instance.create_modify_message());
+            } else if let Some(launch_keepalive) = &instance.launch_keepalive && !launch_keepalive.is_alive() {
+                self.send.send(instance.create_modify_message());
             } else if instance.has_active_session() {
                 self.send.send(MessageToFrontend::InstancePlaytimeUpdated {
                     id: instance.id,

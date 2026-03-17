@@ -667,6 +667,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "sanitize-filename",
  "schema",
+ "scopeguard",
  "serde",
  "serde-xml-rs",
  "serde_json",
