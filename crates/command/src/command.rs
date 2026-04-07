@@ -1,5 +1,7 @@
 use std::{borrow::Cow, collections::BTreeMap, ffi::{OsStr, OsString}, io::{Error, ErrorKind, PipeReader, PipeWriter}, path::{Path, PathBuf}, sync::Arc};
 
+#[cfg(target_os = "macos")]
+use crate::unix::unix_helpers::RawStringVec;
 use crate::{process::PandoraProcess, spawner::SpawnType};
 
 pub struct PandoraCommand {
@@ -15,6 +17,10 @@ pub struct PandoraCommand {
     pub(crate) force_feedback: bool,
     #[cfg(unix)]
     pub(crate) pass_fds: Vec<std::os::fd::OwnedFd>,
+    #[cfg(target_os = "macos")]
+    pub(crate) sandbox_profile: Option<std::ffi::CString>,
+    #[cfg(target_os = "macos")]
+    pub(crate) sandbox_params: Option<RawStringVec>,
 }
 
 impl PandoraCommand {
@@ -34,6 +40,10 @@ impl PandoraCommand {
             force_feedback: false,
             #[cfg(unix)]
             pass_fds: Default::default(),
+            #[cfg(target_os = "macos")]
+            sandbox_profile: None,
+            #[cfg(target_os = "macos")]
+            sandbox_params: None,
         }
     }
 
@@ -101,6 +111,8 @@ impl PandoraCommand {
             return Err(Error::new(ErrorKind::NotFound, "unable to resolve executable"));
         };
 
+        debug_assert!(path.is_absolute());
+
         #[cfg(windows)]
         {
             // Try to remove the \\?\ verbatim path prefix since it can break some applications
@@ -111,6 +123,30 @@ impl PandoraCommand {
         }
 
         Ok(path)
+    }
+
+    pub(crate) fn take_final_env(&mut self) -> BTreeMap<PandoraArg, PandoraArg> {
+        if let Some(inherit_env) = self.inherit_env {
+            for (k, v) in std::env::vars_os() {
+                let k: PandoraArg = k.into();
+                if self.env.contains_key(&k) {
+                    continue;
+                }
+                if !(inherit_env)(&k.0) {
+                    continue;
+                }
+                self.env.insert(k, v.into());
+            }
+        } else {
+            for (k, v) in std::env::vars_os() {
+                let k: PandoraArg = k.into();
+                if self.env.contains_key(&k) {
+                    continue;
+                }
+                self.env.insert(k, v.into());
+            }
+        }
+        std::mem::take(&mut self.env)
     }
 }
 
@@ -172,7 +208,6 @@ pub struct PandoraSandbox {
 
     #[cfg(target_os = "linux")]
     pub sandbox_dir: Arc<Path>,
-
     #[cfg(windows)]
     pub name: Arc<OsStr>,
     #[cfg(windows)]

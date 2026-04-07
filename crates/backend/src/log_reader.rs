@@ -1,8 +1,4 @@
-use std::{
-    borrow::Cow,
-    io::{BufRead, BufReader, PipeReader},
-    sync::{Arc, atomic::AtomicUsize},
-};
+use std::{borrow::Cow, io::{BufRead, BufReader, PipeReader}, sync::{Arc, atomic::AtomicUsize}};
 
 use bridge::{
     game_output::GameOutputLogLevel, handle::FrontendHandle, keep_alive::KeepAlive, message::MessageToFrontend,

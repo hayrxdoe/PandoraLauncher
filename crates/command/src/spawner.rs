@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::{io::{Error, ErrorKind}, sync::mpsc};
 
 use once_cell::sync::OnceCell;
 
@@ -27,9 +27,12 @@ pub struct SpawnContext {
     pub job_handle: Option<std::os::windows::io::OwnedHandle>,
     #[cfg(windows)]
     pub null_device: Option<std::os::windows::io::OwnedHandle>,
+    #[cfg(unix)]
+    pub dev_null_fd: Option<libc::c_int>,
 }
 
-fn illegal_char(b: u8) -> bool {
+#[cfg(windows)]
+fn illegal_filename_char(b: u8) -> bool {
     b < 0x1f || matches!(b, b'/' | b'?' | b'<' | b'>' | b'\\' | b':' | b'*' | b'|' | b'"')
 }
 
@@ -72,7 +75,7 @@ fn handle_spawn(mut command: PandoraCommand, spawn_type: SpawnType, context: &mu
     match spawn_type {
         SpawnType::Normal => {
             #[cfg(unix)]
-            return crate::unix::unix_spawn::spawn(command);
+            return crate::unix::unix_spawn::spawn(command, context);
             #[cfg(windows)]
             return crate::windows::windows_spawn::spawn(command, context);
         },
@@ -81,10 +84,16 @@ fn handle_spawn(mut command: PandoraCommand, spawn_type: SpawnType, context: &mu
             command.stdout = crate::PandoraStdioReadMode::Null;
             command.stderr = crate::PandoraStdioReadMode::Null;
 
+            if command.inherit_env.is_some() || !command.env.is_empty() {
+                return Err(Error::new(ErrorKind::InvalidInput, "cannot set custom environment for elevated process"));
+            }
+
             #[cfg(target_os = "linux")]
             return crate::unix::linux::pkexec::spawn(command);
             #[cfg(windows)]
             return crate::windows::runas::spawn(command, context);
+            #[cfg(target_os = "macos")]
+            return crate::unix::macos::elevated::spawn(command);
         },
         SpawnType::Sandboxed(sandbox) => {
             #[cfg(target_os = "linux")]
@@ -92,11 +101,14 @@ fn handle_spawn(mut command: PandoraCommand, spawn_type: SpawnType, context: &mu
 
             #[cfg(windows)]
             {
-                if sandbox.name.as_encoded_bytes().iter().any(|b| illegal_char(*b)) {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "name contained illegal character"));
+                if sandbox.name.as_encoded_bytes().iter().any(|b| illegal_filename_char(*b)) {
+                    return Err(Error::new(ErrorKind::InvalidInput, "name contained illegal character"));
                 }
                 return crate::windows::appcontainer::spawn(command, sandbox, context);
             }
+
+            #[cfg(target_os = "macos")]
+            return crate::unix::macos::sandbox::spawn(command, sandbox, context);
         },
     }
 }

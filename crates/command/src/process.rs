@@ -1,6 +1,6 @@
 use crate::PandoraExitStatus;
 #[cfg(unix)]
-use crate::unix::unix_helpers::{cvt, cvt_r};
+use crate::unix::unix_helpers::cvt_r;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProcessTerminateState {
@@ -17,6 +17,7 @@ pub struct PandoraProcess {
     pub(crate) process_handle: windows::Win32::Foundation::HANDLE,
 
     terminate_state: ProcessTerminateState,
+    exit_status: Option<PandoraExitStatus>,
 }
 
 unsafe impl Send for PandoraProcess {}
@@ -26,7 +27,6 @@ unsafe impl Sync for PandoraProcess {}
 impl Drop for PandoraProcess {
     fn drop(&mut self) {
         use windows::core::Free;
-
         unsafe {
             std::mem::take(&mut self.process_handle).free();
         }
@@ -39,6 +39,7 @@ impl PandoraProcess {
         Self {
             pid,
             terminate_state: ProcessTerminateState::Running,
+            exit_status: None,
         }
     }
 
@@ -119,7 +120,7 @@ impl PandoraProcess {
         {
             let mut status = 0 as libc::c_int;
             cvt_r(|| unsafe { libc::waitpid(self.pid, &mut status, 0) })?;
-            return Ok(Some(PandoraExitStatus(status)));
+            return Ok(PandoraExitStatus(status));
         }
 
         #[cfg(windows)]
@@ -136,9 +137,21 @@ impl PandoraProcess {
     }
 
     pub fn try_wait(&mut self) -> std::io::Result<Option<PandoraExitStatus>> {
+        // Need to remember the exit status due to waitpid at-most-once semantics
+        if let Some(exit_status) = self.exit_status {
+            return Ok(Some(exit_status));
+        }
+
         #[cfg(unix)]
         {
-            compile_error!("todo");
+            let mut status = 0 as libc::c_int;
+            cvt_r(|| unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) })?;
+            if status == 0 {
+                return Ok(None);
+            } else {
+                self.exit_status = Some(PandoraExitStatus(status));
+                return Ok(self.exit_status);
+            }
         }
 
         #[cfg(windows)]
@@ -152,11 +165,13 @@ impl PandoraProcess {
 
             let mut code = 0;
             windows::Win32::System::Threading::GetExitCodeProcess(self.process_handle, &mut code)?;
-            return Ok(Some(PandoraExitStatus(code)));
+            self.exit_status = Some(PandoraExitStatus(code));
+            return Ok(self.exit_status);
         }
     }
 }
 
+#[cfg(windows)]
 struct CloseWindowData {
     match_process: u32,
     found: bool,

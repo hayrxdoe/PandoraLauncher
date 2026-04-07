@@ -2217,6 +2217,8 @@ impl LaunchContext {
             ],
             is_jvm: true,
             grant_network_access: true,
+            #[cfg(target_os = "linux")]
+            sandbox_dir: self.sandbox_dir.clone(),
             #[cfg(windows)]
             name: Arc::from(OsStr::new("PandoraInstanceSandbox")),
             #[cfg(windows)]

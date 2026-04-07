@@ -430,21 +430,33 @@ impl BackendState {
             let mut killed = false;
 
             instance.processes.retain_mut(|process| {
-                if matches!(process.try_wait(), Ok(None)) {
-                    true
-                } else {
-                    log::debug!("Child process {} is no longer alive", process.id());
-                    killed = true;
-                    false
+                match process.try_wait() {
+                    Ok(None) => true,
+                    Ok(Some(status)) => {
+                        log::info!("Child process {} is no longer alive: {}", process.id(), status);
+                        killed = true;
+                        false
+                    }
+                    Err(err) => {
+                        log::error!("An error occured while waiting for process {}: {:?}", process.id(), err);
+                        killed = true;
+                        false
+                    },
                 }
             });
             instance.closing_processes.retain_mut(|(process, _)| {
-                if matches!(process.try_wait(), Ok(None)) {
-                    true
-                } else {
-                    log::debug!("Child process {} is no longer alive", process.id());
-                    killed = true;
-                    false
+                match process.try_wait() {
+                    Ok(None) => true,
+                    Ok(Some(status)) => {
+                        log::info!("Child process {} is no longer alive: {}", process.id(), status);
+                        killed = true;
+                        false
+                    }
+                    Err(err) => {
+                        log::error!("An error occured while waiting for process {}: {:?}", process.id(), err);
+                        killed = true;
+                        false
+                    },
                 }
             });
 
@@ -453,6 +465,7 @@ impl BackendState {
                 now > *deadline
             });
             for (process, _) in to_kill {
+                log::info!("Force killed process {}", process.id());
                 let result = process.kill();
                 killed = true;
                 if let Err(err) = result {
