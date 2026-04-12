@@ -957,13 +957,34 @@ impl BackendState {
                     return;
                 }
 
-                let mut line: Vec<u8> = buffer.into();
+                let initial_data: Vec<u8> = buffer.into();
                 let file = reader.into_inner();
                 let mut reader = tokio::io::BufReader::new(tokio::fs::File::from_std(file));
 
                 tokio::task::spawn(async move {
-                    let mut first = true;
                     let mut factory = ArcStrFactory::default();
+                    let mut remaining = initial_data.as_slice();
+                    while let Some(index) = memchr::memchr(b'\n', remaining) {
+                        let line = &remaining[..index+1];
+                        remaining = &remaining[index+1..];
+
+                        if send_log_line(&line, &send, &mut factory).await.is_err() {
+                            return;
+                        }
+                        frontend.send_with_serial(MessageToFrontend::Refresh, &serial);
+                    }
+
+                    let remaining = remaining.trim_ascii_end();
+                    let remaining_len = remaining.len();
+                    let mut line = initial_data;
+                    if remaining_len == 0 {
+                        line.clear();
+                    } else {
+                        let from = line.len() - remaining_len;
+                        line.copy_within(from.., 0);
+                        line.truncate(remaining_len);
+                    };
+
                     loop {
                         tokio::select! {
                             _ = send.closed() => {
@@ -976,33 +997,16 @@ impl BackendState {
                                     tokio::time::sleep(Duration::from_millis(250)).await;
                                 },
                                 Ok(_) => {
-                                    match str::from_utf8(&*line) {
-                                        Ok(utf8) => {
-                                            if first {
-                                                first = false;
-                                                for line in utf8.split('\n') {
-                                                    let replaced = log_reader::replace(line.trim_ascii_end());
-                                                    if send.send(factory.create(&replaced)).await.is_err() {
-                                                        return;
-                                                    }
-                                                }
-                                            } else {
-                                                let replaced = log_reader::replace(utf8.trim_ascii_end());
-                                                if send.send(factory.create(&replaced)).await.is_err() {
-                                                    return;
-                                                }
-                                            }
-                                        },
-                                        Err(e) => {
-                                            let error = format!("Invalid UTF8: {e}");
-                                            for line in error.split('\n') {
-                                                let replaced = log_reader::replace(line.trim_ascii_end());
-                                                if send.send(factory.create(&replaced)).await.is_err() {
-                                                    return;
-                                                }
-                                            }
-                                        },
+                                    if line.last() != Some(&b'\n') {
+                                        // Didn't read the full line, wait a bit and try again
+                                        tokio::time::sleep(Duration::from_millis(250)).await;
+                                        continue;
                                     }
+
+                                    if send_log_line(&line, &send, &mut factory).await.is_err() {
+                                        return;
+                                    }
+
                                     frontend.send_with_serial(MessageToFrontend::Refresh, &serial);
                                     line.clear();
                                 },
@@ -2309,4 +2313,21 @@ fn check_argument_expansions(argument: &str) {
             dollar_last = false;
         }
     }
+}
+
+async fn send_log_line(line: &[u8], send: &tokio::sync::mpsc::Sender<Arc<str>>, factory: &mut ArcStrFactory) -> Result<(), tokio::sync::mpsc::error::SendError<Arc<str>>> {
+    match str::from_utf8(&*line) {
+        Ok(utf8) => {
+            let replaced = log_reader::replace(utf8.trim_ascii_end());
+            send.send(factory.create(&replaced)).await?;
+        },
+        Err(e) => {
+            let error = format!("Invalid UTF8: {e}");
+            for line in error.split('\n') {
+                let replaced = log_reader::replace(line.trim_ascii_end());
+                send.send(factory.create(&replaced)).await?;
+            }
+        },
+    }
+    Ok(())
 }
