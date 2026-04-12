@@ -143,6 +143,7 @@ pub fn start(runtime: tokio::runtime::Runtime, launcher_dir: PathBuf, send: Fron
         server_list_pinger: Arc::new(ServerListPinger::new()),
         quit_coordinator: quit_handler,
         should_quit: AtomicBool::new(false),
+        content_install_semaphore: Semaphore::new(8),
     };
 
     log::debug!("Doing initial backend load");
@@ -203,6 +204,7 @@ pub struct BackendState {
     pub server_list_pinger: Arc<ServerListPinger>,
     pub quit_coordinator: QuitCoordinator,
     pub should_quit: AtomicBool,
+    pub content_install_semaphore: Semaphore,
 }
 
 pub struct CachedMinecraftProfile {

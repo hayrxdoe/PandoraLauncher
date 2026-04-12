@@ -485,9 +485,12 @@ impl BackendState {
                 self.download_all_metadata().await;
             },
             MessageToBackend::InstallContent { content, modal_action } => {
-                self.install_content(content, modal_action.clone()).await;
-                modal_action.set_finished();
-                self.send.send(MessageToFrontend::Refresh);
+                let this = self.clone();
+                tokio::spawn(async move {
+                    this.install_content(content, modal_action.clone()).await;
+                    modal_action.set_finished();
+                    this.send.send(MessageToFrontend::Refresh);
+                });
             },
             MessageToBackend::DeleteContent { id, content_ids: mod_ids } => {
                 let mut instance_state = self.instance_state.write();
