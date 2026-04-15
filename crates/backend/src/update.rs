@@ -224,7 +224,7 @@ async fn install_update_inner(http_client: reqwest::Client, dirs: &LauncherDirec
             let new_filename = replace_os_str(filename, &format!("-{}", &update.old_version), "");
             let new_appimage = appimage.with_file_name(new_filename);
 
-            write_new_exe(appimage, new_appimage, &bytes, dirs)?;
+            replace_exe(appimage, new_appimage, &bytes, dirs)?;
         },
         UpdateInstallType::Executable => {
             let Ok(current_exe) = std::env::current_exe() else {
@@ -240,7 +240,7 @@ async fn install_update_inner(http_client: reqwest::Client, dirs: &LauncherDirec
             let new_filename = replace_os_str(filename, &format!("-{}", &update.old_version), "");
             let new_exe = current_exe.with_file_name(new_filename);
 
-            write_new_exe(current_exe, new_exe, &bytes, dirs)?;
+            replace_exe(current_exe, new_exe, &bytes, dirs)?;
         },
         UpdateInstallType::App(current_app_folder) => {
             let mut temp_extract = dirs.temp_dir.join(format!("app_unpack_{}", rand::thread_rng().next_u64()));
@@ -271,27 +271,49 @@ async fn install_update_inner(http_client: reqwest::Client, dirs: &LauncherDirec
     Ok(())
 }
 
-fn write_new_exe(old_exe: PathBuf, new_exe: PathBuf, data: &[u8], dirs: &LauncherDirectories) -> Result<(), String> {
-    let mut new_exe_data = dirs.temp_dir.join(format!("new_exe_data_{}", rand::thread_rng().next_u64()));
+fn add_new_extension(path: &Path) -> PathBuf {
+    let mut new_exe_data = path.with_added_extension(format!("{}.new", rand::thread_rng().next_u64()));
     while new_exe_data.exists() {
         log::warn!("Randomly generated new_exe_data file exists... what are the chances? ({:?})", new_exe_data);
-        new_exe_data = dirs.temp_dir.join(format!("new_exe_data_{}", rand::thread_rng().next_u64()));
+        new_exe_data = path.with_added_extension(format!("{}.new", rand::thread_rng().next_u64()));
     }
+    return new_exe_data;
+}
+
+fn write_new_exe_temp(new_exe: &Path, data: &[u8], dirs: &LauncherDirectories) -> Result<PathBuf, String> {
+    let new_exe_data = add_new_extension(new_exe);
+
+    let Err(err) = std::fs::write(&new_exe_data, data) else {
+        return Ok(new_exe_data);
+    };
+
+    if err.kind() != std::io::ErrorKind::PermissionDenied {
+        log::error!("Error while writing new executable: {}", err);
+        return Err("Error while writing new executable, see logs for more details".into());
+    }
+
+    let new_exe_data = add_new_extension(&dirs.temp_dir.join("new_exe_data"));
 
     if let Err(err) = std::fs::write(&new_exe_data, data) {
         log::error!("Error while writing new executable: {}", err);
         return Err("Error while writing new executable, see logs for more details".into());
     }
 
+    Ok(new_exe_data)
+}
+
+fn replace_exe(old_exe: PathBuf, new_exe: PathBuf, data: &[u8], dirs: &LauncherDirectories) -> Result<(), String> {
+    let new_exe_temp = write_new_exe_temp(&new_exe, data, dirs)?;
+
     #[cfg(unix)]
     {
-        let result = move_new_exe_into(old_exe, new_exe, &new_exe_data);
-        _ = std::fs::remove_file(new_exe_data);
+        let result = move_new_exe_into(old_exe, new_exe, &new_exe_temp);
+        _ = std::fs::remove_file(new_exe_temp);
         return result;
     }
     #[cfg(windows)]
     {
-        launch_update_helper(old_exe, new_exe, &new_exe_data);
+        launch_update_helper(old_exe, new_exe, &new_exe_temp);
         return Ok(());
     }
 }
