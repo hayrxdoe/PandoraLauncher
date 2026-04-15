@@ -63,6 +63,10 @@ pub enum MessageToBackend {
         id: InstanceID,
         disable_file_syncing: bool,
     },
+    SetInstanceSandboxing {
+        id: InstanceID,
+        sandbox: bool,
+    },
     SetInstanceMemory {
         id: InstanceID,
         memory: InstanceMemoryConfiguration,

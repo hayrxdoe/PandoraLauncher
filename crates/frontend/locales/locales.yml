@@ -458,6 +458,11 @@ instance:
     en: Use System OpenAL
   select_openal_lib:
     en: Select OpenAL Library
+  security:
+    label:
+      en: Security
+    sandbox:
+      en: Sandbox
 
   # Linux Specific
   linux:

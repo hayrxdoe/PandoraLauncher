@@ -37,6 +37,7 @@ pub struct InstanceSettingsSubpage {
     loader_versions_state: TypelessFrontendMetadataResult,
     loader_version_select_state: Entity<SelectState<SearchableVec<&'static str>>>,
     disable_file_syncing: bool,
+    sandbox: bool,
 
     memory_override_enabled: bool,
     memory_min_input_state: Entity<InputState>,
@@ -89,6 +90,7 @@ impl InstanceSettingsSubpage {
         let preferred_loader_version = entry.configuration.preferred_loader_version.map(|s| s.as_str()).unwrap_or("Latest");
         let account = entry.configuration.preferred_account;
         let disable_file_syncing = entry.configuration.disable_file_syncing;
+        let sandbox = entry.configuration.sandbox;
 
         let memory = entry.configuration.memory.unwrap_or_default();
         let wrapper_command = entry.configuration.wrapper_command.clone().unwrap_or_default();
@@ -216,6 +218,7 @@ impl InstanceSettingsSubpage {
             loader_select_state,
             loader_version_select_state,
             disable_file_syncing,
+            sandbox,
             memory_override_enabled: memory.enabled,
             memory_min_input_state,
             memory_max_input_state,
@@ -808,6 +811,16 @@ impl Render for InstanceSettingsSubpage {
                     page.backend_handle.send(MessageToBackend::SetInstanceDisableFileSyncing {
                         id: page.instance_id,
                         disable_file_syncing: *value
+                    });
+                }))
+            ))
+            .child(crate::labelled(
+                ts!("instance.security.label"),
+                Checkbox::new("sandbox").label(ts!("instance.security.sandbox")).checked(self.sandbox).on_click(cx.listener(|page, value, _, _| {
+                    page.sandbox = *value;
+                    page.backend_handle.send(MessageToBackend::SetInstanceSandboxing {
+                        id: page.instance_id,
+                        sandbox: *value
                     });
                 }))
             ));

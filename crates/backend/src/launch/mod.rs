@@ -2224,31 +2224,34 @@ impl LaunchContext {
 
         command.arg("com.moulberry.pandora.LaunchWrapper");
 
-        let mut child = command.spawn_sandboxed(PandoraSandbox {
-            allow_read: vec![
-                self.libraries_dir.clone(),
-                self.log_configs_dir.clone(),
-                self.launch_wrapper_path.clone(),
-                self.assets_root.clone(),
-            ],
-            allow_write: vec![
-                self.game_dir.clone(),
-                self.natives_dir.clone().into(),
-            ],
-            is_jvm: true,
-            grant_network_access: true,
-            #[cfg(target_os = "linux")]
-            sandbox_dir: self.sandbox_dir.clone(),
-            #[cfg(windows)]
-            name: Arc::from(OsStr::new("PandoraInstanceSandbox")),
-            #[cfg(windows)]
-            description: Arc::from(OsStr::new("Sandbox for Minecraft instances run by Pandora Launcher")),
-            #[cfg(windows)]
-            self_elevate_for_acl_arg: Some(PandoraArg::from(OsStr::new("--internal-set-traverse-acls"))),
-            #[cfg(windows)]
-            grant_winsta_writeattributes: true,
-        }).await?;
-        // let mut child = command.spawn().await?;
+        let mut child = if self.configuration.sandbox {
+            command.spawn_sandboxed(PandoraSandbox {
+                allow_read: vec![
+                    self.libraries_dir.clone(),
+                    self.log_configs_dir.clone(),
+                    self.launch_wrapper_path.clone(),
+                    self.assets_root.clone(),
+                ],
+                allow_write: vec![
+                    self.game_dir.clone(),
+                    self.natives_dir.clone().into(),
+                ],
+                is_jvm: true,
+                grant_network_access: true,
+                #[cfg(target_os = "linux")]
+                sandbox_dir: self.sandbox_dir.clone(),
+                #[cfg(windows)]
+                name: Arc::from(OsStr::new("PandoraInstanceSandbox")),
+                #[cfg(windows)]
+                description: Arc::from(OsStr::new("Sandbox for Minecraft instances run by Pandora Launcher")),
+                #[cfg(windows)]
+                self_elevate_for_acl_arg: Some(PandoraArg::from(OsStr::new("--internal-set-traverse-acls"))),
+                #[cfg(windows)]
+                grant_winsta_writeattributes: true,
+            }).await?
+        } else {
+            command.spawn().await?
+        };
 
         let mut stdin = child.stdin.take().expect("stdin present");
 

@@ -135,6 +135,13 @@ impl BackendState {
                 }
                 self.apply_syncing_to_instance(id);
             },
+            MessageToBackend::SetInstanceSandboxing { id, sandbox } => {
+                if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
+                    instance.configuration.modify(|configuration| {
+                        configuration.sandbox = sandbox;
+                    });
+                }
+            },
             MessageToBackend::SetInstanceMemory { id, memory } => {
                 if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
                     instance.configuration.modify(|configuration| {
